@@ -1,0 +1,13 @@
+<mujoco model="go2 scene with sensors">
+  <!-- 在原来的场景上，给狗背的 imu 点加了三种“感觉器官” -->
+  <include file="scene.xml"/>
+
+  <sensor>
+    <!-- 身体朝向（用四个数字表示旋转，程序里会换成好懂的角度） -->
+    <framequat name="imu_quat" objtype="site" objname="imu"/>
+    <!-- 转得有多快（像陀螺仪） -->
+    <gyro name="imu_gyro" site="imu"/>
+    <!-- 加速度（像手机里测晃动的传感器） -->
+    <accelerometer name="imu_acc" site="imu"/>
+  </sensor>
+</mujoco>

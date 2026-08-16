@@ -1,0 +1,197 @@
+"""蜘蛛多技能环境：往前爬、空翻、倒了自动翻面。
+
+观测里有一个 3 维指令（爬 / 空翻 / 翻面），策略根据指令做事。
+直立爬的时候如果翻过去了，指令会自动切成「翻面」。
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import gymnasium as gym
+import mujoco
+import numpy as np
+from gymnasium import spaces
+
+XML = Path(__file__).resolve().parent / "spider_quad" / "spider_quad.xml"
+
+KP = 28.0
+KD = 0.9
+ACTION_SCALE = 0.45
+CMD_WALK, CMD_FLIP, CMD_RIGHT = 0, 1, 2
+MAX_STEPS = 500
+
+
+def projected_gravity(quat: np.ndarray) -> np.ndarray:
+    qw, qx, qy, qz = quat
+    g = np.zeros(3, dtype=np.float32)
+    g[0] = 2 * (-qz * qx + qw * qy)
+    g[1] = -2 * (qz * qy + qw * qx)
+    g[2] = 1 - 2 * (qw * qw + qz * qz)
+    return g
+
+
+class SpiderEnv(gym.Env):
+    metadata = {"render_modes": ["human"], "render_fps": 50}
+
+    def __init__(self, render_mode=None):
+        self.model = mujoco.MjModel.from_xml_path(str(XML))
+        self.data = mujoco.MjData(self.model)
+        self.render_mode = render_mode
+        self.viewer = None
+        self.frame_skip = 10
+        self.model.opt.timestep = 0.002
+        self.dt = self.model.opt.timestep * self.frame_skip
+
+        if render_mode is None:
+            for name in ("crate_a", "crate_b"):
+                gid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, name)
+                if gid >= 0:
+                    self.model.geom_pos[gid, 0] = 80.0
+
+        mujoco.mj_resetDataKeyframe(self.model, self.data, 0)
+        self.q_stand = self.data.qpos[7:].astype(np.float32).copy()
+        self.prev_action = np.zeros(self.model.nu, dtype=np.float32)
+        self.command = CMD_WALK
+        self.steps = 0
+        self.pitch_acc = 0.0
+        self.flip_bonus_given = False
+        self.right_bonus_given = False
+
+        n = self.model.nu
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(n,), dtype=np.float32)
+        obs_dim = 3 + 3 + n * 3 + 3
+        self.observation_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32
+        )
+
+    def _cmd_onehot(self) -> np.ndarray:
+        v = np.zeros(3, dtype=np.float32)
+        v[int(self.command)] = 1.0
+        return v
+
+    def _get_obs(self) -> np.ndarray:
+        grav = projected_gravity(self.data.qpos[3:7])
+        omega = self.data.qvel[3:6].astype(np.float32) * 0.2
+        q = (self.data.qpos[7:] - self.q_stand).astype(np.float32)
+        dq = (self.data.qvel[6:] * 0.05).astype(np.float32)
+        return np.concatenate(
+            [grav, omega, q, dq, self.prev_action, self._cmd_onehot()]
+        ).astype(np.float32)
+
+    def set_command(self, cmd: int) -> None:
+        self.command = int(np.clip(cmd, 0, 2))
+
+    def _maybe_auto_right(self) -> None:
+        """爬的时候一旦肚子朝天，自动改成翻面任务。"""
+        if self.command == CMD_WALK:
+            grav = projected_gravity(self.data.qpos[3:7])
+            if float(grav[2]) < 0.15:
+                self.command = CMD_RIGHT
+                self.right_bonus_given = False
+
+    def _reward(self, action: np.ndarray) -> float:
+        grav = projected_gravity(self.data.qpos[3:7])
+        up = float(grav[2])
+        z = float(self.data.qpos[2])
+        vx = float(self.data.qvel[0])
+        wy = float(self.data.qvel[4])
+        smooth = float(np.square(action - self.prev_action).mean())
+        energy = float(np.square(action).mean())
+        r = -0.01 * energy - 0.005 * smooth
+
+        if self.command == CMD_WALK:
+            r += 2.2 * vx
+            r += 0.6 * up
+            if 0.12 < z < 0.28:
+                r += 0.3
+            r -= 0.04 * abs(float(self.data.qvel[5]))
+        elif self.command == CMD_FLIP:
+            r += 0.35 * float(np.clip(wy, 0.0, 12.0))
+            self.pitch_acc += wy * self.dt
+            if (not self.flip_bonus_given) and self.pitch_acc > 5.0 and up > 0.45:
+                r += 15.0
+                self.flip_bonus_given = True
+            if self.flip_bonus_given:
+                r += 1.2 * vx + 0.5 * up
+        else:
+            r += 2.4 * up
+            if 0.10 < z < 0.30:
+                r += 0.4
+            if (not self.right_bonus_given) and up > 0.75 and z > 0.11:
+                r += 10.0
+                self.right_bonus_given = True
+            if self.right_bonus_given:
+                r += 1.0 * vx
+        return r
+
+    def step(self, action):
+        action = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
+        target = self.q_stand + action * ACTION_SCALE
+        for _ in range(self.frame_skip):
+            q = self.data.qpos[7:]
+            dq = self.data.qvel[6:]
+            tau = KP * (target - q) - KD * dq
+            lo = self.model.actuator_ctrlrange[:, 0]
+            hi = self.model.actuator_ctrlrange[:, 1]
+            self.data.ctrl[:] = np.clip(tau, lo, hi)
+            mujoco.mj_step(self.model, self.data)
+
+        self.steps += 1
+        self._maybe_auto_right()
+        obs = self._get_obs()
+        reward = self._reward(action)
+        self.prev_action = action.copy()
+
+        z = float(self.data.qpos[2])
+        terminated = z < 0.03 or z > 0.55
+        truncated = self.steps >= MAX_STEPS
+        if self.render_mode == "human":
+            self.render()
+        info = {
+            "x": float(self.data.qpos[0]),
+            "vx": float(self.data.qvel[0]),
+            "z": z,
+            "cmd": int(self.command),
+        }
+        return obs, float(reward), terminated, truncated, info
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        mujoco.mj_resetDataKeyframe(self.model, self.data, 0)
+        self.steps = 0
+        self.pitch_acc = 0.0
+        self.flip_bonus_given = False
+        self.right_bonus_given = False
+        self.prev_action[:] = 0
+
+        forced = None
+        if options and "command" in options:
+            forced = int(options["command"])
+
+        roll = float(self.np_random.random()) if forced is None else -1.0
+        if forced == CMD_RIGHT or (forced is None and roll < 0.28):
+            self.command = CMD_RIGHT
+            self.data.qpos[2] = 0.16
+            self.data.qpos[3:7] = np.array([0.0, 1.0, 0.0, 0.0])
+        elif forced == CMD_FLIP or (forced is None and roll < 0.55):
+            self.command = CMD_FLIP
+        else:
+            self.command = CMD_WALK if forced is None else forced
+
+        self.data.qpos[7:] += self.np_random.uniform(-0.04, 0.04, size=self.model.nu)
+        self.data.qvel[:] = self.np_random.uniform(-0.03, 0.03, size=self.model.nv)
+        mujoco.mj_forward(self.model, self.data)
+        return self._get_obs(), {"cmd": int(self.command)}
+
+    def render(self):
+        if self.viewer is None:
+            import mujoco.viewer
+
+            self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
+        self.viewer.sync()
+
+    def close(self):
+        if self.viewer is not None:
+            self.viewer.close()
+            self.viewer = None

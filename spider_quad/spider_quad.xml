@@ -1,0 +1,202 @@
+<mujoco model="spider_quad">
+  <!-- 机械自爆蜘蛛外形（红警恐怖机器人那种），关节仍是 4 腿 × 3 轴。 -->
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.002" gravity="0 0 -9.81"/>
+
+  <visual>
+    <headlight ambient="0.45 0.45 0.48" diffuse="0.7 0.7 0.72" specular="0.25 0.25 0.25"/>
+    <rgba haze="0.15 0.18 0.22 1"/>
+    <global azimuth="-140" elevation="-22"/>
+  </visual>
+
+  <default>
+    <joint damping="0.15" armature="0.008" limited="true"/>
+    <geom friction="1.4 0.05 0.01" condim="3"/>
+    <motor gear="1" ctrlrange="-6 6" ctrllimited="true"/>
+    <default class="visual">
+      <geom contype="0" conaffinity="0" group="1" density="0"/>
+    </default>
+  </default>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.55 0.68 0.82" rgb2="0.95 0.96 0.98" width="256" height="512"/>
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.32 0.34 0.36" rgb2="0.22 0.24 0.26"
+      width="256" height="256"/>
+    <material name="grid" texture="grid" texrepeat="6 6" reflectance="0.12"/>
+    <material name="gunmetal" rgba="0.16 0.17 0.19 1" specular="0.35" shininess="0.35"/>
+    <material name="steel" rgba="0.62 0.64 0.68 1" specular="0.85" shininess="0.8"/>
+    <material name="darksteel" rgba="0.22 0.23 0.25 1" specular="0.5" shininess="0.45"/>
+    <material name="hazard" rgba="0.75 0.12 0.10 1" specular="0.4" shininess="0.3"/>
+    <material name="glow_red" rgba="1.0 0.12 0.08 1" emission="1.2" specular="0.2"/>
+    <material name="glow_core" rgba="1.0 0.25 0.08 1" emission="1.4"/>
+    <material name="claw" rgba="0.08 0.08 0.09 1" specular="0.6" shininess="0.7"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0.4 0.3 1.6" dir="-0.2 -0.15 -1" diffuse="0.9 0.9 0.92" specular="0.3 0.3 0.3"/>
+    <light pos="-0.3 -0.4 1.2" dir="0.1 0.2 -1" diffuse="0.45 0.48 0.52"/>
+    <geom name="floor" type="plane" size="0 0 0.05" material="grid"/>
+    <geom name="crate_a" type="box" pos="0.55 0.15 0.04" size="0.08 0.08 0.04" material="darksteel"/>
+    <geom name="crate_b" type="box" pos="0.90 -0.25 0.05" size="0.10 0.06 0.05" material="gunmetal"/>
+
+    <body name="torso" pos="0 0 0.18">
+      <freejoint name="root"/>
+      <inertial mass="0.7" pos="0 0 0" diaginertia="0.003 0.003 0.004"/>
+      <site name="imu" size="0.006" pos="0 0 0.02"/>
+
+      <!-- 碰撞用核心 -->
+      <geom name="torso" type="cylinder" size="0.058 0.020" material="gunmetal"/>
+
+      <!-- 装甲层：底盘、顶盖、一圈斜甲 -->
+      <geom class="visual" type="cylinder" size="0.072 0.010" pos="0 0 -0.016" material="darksteel"/>
+      <geom class="visual" type="cylinder" size="0.068 0.008" pos="0 0 0.022" material="steel"/>
+      <geom class="visual" type="cylinder" size="0.040 0.006" pos="0 0 0.032" material="gunmetal"/>
+      <geom class="visual" type="box" size="0.028 0.070 0.014" pos="0 0 0.002" material="darksteel"/>
+      <geom class="visual" type="box" size="0.070 0.028 0.014" pos="0 0 0.002" material="darksteel"/>
+
+      <!-- 红色警戒条 -->
+      <geom class="visual" type="box" size="0.074 0.006 0.004" pos="0 0 0.012" material="hazard"/>
+      <geom class="visual" type="box" size="0.006 0.074 0.004" pos="0 0 0.012" material="hazard"/>
+
+      <!-- 顶部反应堆 / 自爆核心 -->
+      <geom class="visual" type="cylinder" size="0.022 0.004" pos="0 0 0.040" material="steel"/>
+      <geom class="visual" type="sphere" size="0.018" pos="0 0 0.050" material="glow_core"/>
+      <geom class="visual" type="cylinder" size="0.026 0.002" pos="0 0 0.044" material="hazard"/>
+
+      <!-- 前方双红眼传感器 -->
+      <geom class="visual" type="box" size="0.016 0.028 0.010" pos="0.062 0 0.008" material="gunmetal"/>
+      <geom class="visual" type="sphere" size="0.008" pos="0.078 0.012 0.010" material="glow_red"/>
+      <geom class="visual" type="sphere" size="0.008" pos="0.078 -0.012 0.010" material="glow_red"/>
+      <geom class="visual" type="cylinder" size="0.004 0.012" pos="0.070 0 0.026" euler="0 1.2 0" material="steel"/>
+
+      <!-- 左前 45° -->
+      <body name="FL_coxa" pos="0.0495 0.0495 0" euler="0 0 0.785398">
+        <joint name="FL_coxa" type="hinge" axis="0 0 1" range="-0.9 0.9"/>
+        <inertial mass="0.04" pos="0.02 0 0" diaginertia="2e-5 2e-5 2e-5"/>
+        <geom type="capsule" fromto="0 0 0 0.04 0 0" size="0.009" material="steel"/>
+        <geom class="visual" type="box" size="0.012 0.014 0.012" pos="0 0 0" material="gunmetal"/>
+        <geom class="visual" type="cylinder" size="0.015 0.005" pos="0 0 0.012" material="hazard"/>
+        <body name="FL_femur" pos="0.04 0 0">
+          <joint name="FL_femur" type="hinge" axis="0 1 0" range="-0.3 1.3"/>
+          <inertial mass="0.06" pos="0.05 0 -0.015" diaginertia="4e-5 4e-5 4e-5"/>
+          <geom type="capsule" fromto="0 0 0 0.10 0 -0.03" size="0.008" material="steel"/>
+          <geom class="visual" type="box" size="0.011 0.011 0.011" material="darksteel"/>
+          <geom class="visual" type="box" size="0.048 0.005 0.005" pos="0.050 0 -0.012" euler="0 0.29 0" material="hazard"/>
+          <body name="FL_tibia" pos="0.10 0 -0.03">
+            <joint name="FL_tibia" type="hinge" axis="0 1 0" range="-0.2 1.6"/>
+            <inertial mass="0.05" pos="0.04 0 -0.04" diaginertia="3e-5 3e-5 3e-5"/>
+            <geom type="capsule" fromto="0 0 0 0.08 0 -0.08" size="0.006" material="steel"/>
+            <geom class="visual" type="box" size="0.009 0.009 0.009" material="gunmetal"/>
+            <geom name="FL_foot" type="sphere" pos="0.08 0 -0.08" size="0.012" material="claw"/>
+            <geom class="visual" type="capsule" fromto="0.072 -0.010 -0.072 0.092 -0.016 -0.096" size="0.0035" material="claw"/>
+            <geom class="visual" type="capsule" fromto="0.072 0.010 -0.072 0.092 0.016 -0.096" size="0.0035" material="claw"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- 左后 135° -->
+      <body name="RL_coxa" pos="-0.0495 0.0495 0" euler="0 0 2.356194">
+        <joint name="RL_coxa" type="hinge" axis="0 0 1" range="-0.9 0.9"/>
+        <inertial mass="0.04" pos="0.02 0 0" diaginertia="2e-5 2e-5 2e-5"/>
+        <geom type="capsule" fromto="0 0 0 0.04 0 0" size="0.009" material="steel"/>
+        <geom class="visual" type="box" size="0.012 0.014 0.012" pos="0 0 0" material="gunmetal"/>
+        <geom class="visual" type="cylinder" size="0.015 0.005" pos="0 0 0.012" material="hazard"/>
+        <body name="RL_femur" pos="0.04 0 0">
+          <joint name="RL_femur" type="hinge" axis="0 1 0" range="-0.3 1.3"/>
+          <inertial mass="0.06" pos="0.05 0 -0.015" diaginertia="4e-5 4e-5 4e-5"/>
+          <geom type="capsule" fromto="0 0 0 0.10 0 -0.03" size="0.008" material="steel"/>
+          <geom class="visual" type="box" size="0.011 0.011 0.011" material="darksteel"/>
+          <geom class="visual" type="box" size="0.048 0.005 0.005" pos="0.050 0 -0.012" euler="0 0.29 0" material="hazard"/>
+          <body name="RL_tibia" pos="0.10 0 -0.03">
+            <joint name="RL_tibia" type="hinge" axis="0 1 0" range="-0.2 1.6"/>
+            <inertial mass="0.05" pos="0.04 0 -0.04" diaginertia="3e-5 3e-5 3e-5"/>
+            <geom type="capsule" fromto="0 0 0 0.08 0 -0.08" size="0.006" material="steel"/>
+            <geom class="visual" type="box" size="0.009 0.009 0.009" material="gunmetal"/>
+            <geom name="RL_foot" type="sphere" pos="0.08 0 -0.08" size="0.012" material="claw"/>
+            <geom class="visual" type="capsule" fromto="0.072 -0.010 -0.072 0.092 -0.016 -0.096" size="0.0035" material="claw"/>
+            <geom class="visual" type="capsule" fromto="0.072 0.010 -0.072 0.092 0.016 -0.096" size="0.0035" material="claw"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- 右后 225° -->
+      <body name="RR_coxa" pos="-0.0495 -0.0495 0" euler="0 0 3.926991">
+        <joint name="RR_coxa" type="hinge" axis="0 0 1" range="-0.9 0.9"/>
+        <inertial mass="0.04" pos="0.02 0 0" diaginertia="2e-5 2e-5 2e-5"/>
+        <geom type="capsule" fromto="0 0 0 0.04 0 0" size="0.009" material="steel"/>
+        <geom class="visual" type="box" size="0.012 0.014 0.012" pos="0 0 0" material="gunmetal"/>
+        <geom class="visual" type="cylinder" size="0.015 0.005" pos="0 0 0.012" material="hazard"/>
+        <body name="RR_femur" pos="0.04 0 0">
+          <joint name="RR_femur" type="hinge" axis="0 1 0" range="-0.3 1.3"/>
+          <inertial mass="0.06" pos="0.05 0 -0.015" diaginertia="4e-5 4e-5 4e-5"/>
+          <geom type="capsule" fromto="0 0 0 0.10 0 -0.03" size="0.008" material="steel"/>
+          <geom class="visual" type="box" size="0.011 0.011 0.011" material="darksteel"/>
+          <geom class="visual" type="box" size="0.048 0.005 0.005" pos="0.050 0 -0.012" euler="0 0.29 0" material="hazard"/>
+          <body name="RR_tibia" pos="0.10 0 -0.03">
+            <joint name="RR_tibia" type="hinge" axis="0 1 0" range="-0.2 1.6"/>
+            <inertial mass="0.05" pos="0.04 0 -0.04" diaginertia="3e-5 3e-5 3e-5"/>
+            <geom type="capsule" fromto="0 0 0 0.08 0 -0.08" size="0.006" material="steel"/>
+            <geom class="visual" type="box" size="0.009 0.009 0.009" material="gunmetal"/>
+            <geom name="RR_foot" type="sphere" pos="0.08 0 -0.08" size="0.012" material="claw"/>
+            <geom class="visual" type="capsule" fromto="0.072 -0.010 -0.072 0.092 -0.016 -0.096" size="0.0035" material="claw"/>
+            <geom class="visual" type="capsule" fromto="0.072 0.010 -0.072 0.092 0.016 -0.096" size="0.0035" material="claw"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- 右前 315° -->
+      <body name="FR_coxa" pos="0.0495 -0.0495 0" euler="0 0 -0.785398">
+        <joint name="FR_coxa" type="hinge" axis="0 0 1" range="-0.9 0.9"/>
+        <inertial mass="0.04" pos="0.02 0 0" diaginertia="2e-5 2e-5 2e-5"/>
+        <geom type="capsule" fromto="0 0 0 0.04 0 0" size="0.009" material="steel"/>
+        <geom class="visual" type="box" size="0.012 0.014 0.012" pos="0 0 0" material="gunmetal"/>
+        <geom class="visual" type="cylinder" size="0.015 0.005" pos="0 0 0.012" material="hazard"/>
+        <body name="FR_femur" pos="0.04 0 0">
+          <joint name="FR_femur" type="hinge" axis="0 1 0" range="-0.3 1.3"/>
+          <inertial mass="0.06" pos="0.05 0 -0.015" diaginertia="4e-5 4e-5 4e-5"/>
+          <geom type="capsule" fromto="0 0 0 0.10 0 -0.03" size="0.008" material="steel"/>
+          <geom class="visual" type="box" size="0.011 0.011 0.011" material="darksteel"/>
+          <geom class="visual" type="box" size="0.048 0.005 0.005" pos="0.050 0 -0.012" euler="0 0.29 0" material="hazard"/>
+          <body name="FR_tibia" pos="0.10 0 -0.03">
+            <joint name="FR_tibia" type="hinge" axis="0 1 0" range="-0.2 1.6"/>
+            <inertial mass="0.05" pos="0.04 0 -0.04" diaginertia="3e-5 3e-5 3e-5"/>
+            <geom type="capsule" fromto="0 0 0 0.08 0 -0.08" size="0.006" material="steel"/>
+            <geom class="visual" type="box" size="0.009 0.009 0.009" material="gunmetal"/>
+            <geom name="FR_foot" type="sphere" pos="0.08 0 -0.08" size="0.012" material="claw"/>
+            <geom class="visual" type="capsule" fromto="0.072 -0.010 -0.072 0.092 -0.016 -0.096" size="0.0035" material="claw"/>
+            <geom class="visual" type="capsule" fromto="0.072 0.010 -0.072 0.092 0.016 -0.096" size="0.0035" material="claw"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="FL_coxa" joint="FL_coxa"/>
+    <motor name="FL_femur" joint="FL_femur"/>
+    <motor name="FL_tibia" joint="FL_tibia"/>
+    <motor name="RL_coxa" joint="RL_coxa"/>
+    <motor name="RL_femur" joint="RL_femur"/>
+    <motor name="RL_tibia" joint="RL_tibia"/>
+    <motor name="RR_coxa" joint="RR_coxa"/>
+    <motor name="RR_femur" joint="RR_femur"/>
+    <motor name="RR_tibia" joint="RR_tibia"/>
+    <motor name="FR_coxa" joint="FR_coxa"/>
+    <motor name="FR_femur" joint="FR_femur"/>
+    <motor name="FR_tibia" joint="FR_tibia"/>
+  </actuator>
+
+  <sensor>
+    <framequat name="imu_quat" objtype="site" objname="imu"/>
+    <gyro name="imu_gyro" site="imu"/>
+    <accelerometer name="imu_acc" site="imu"/>
+  </sensor>
+
+  <keyframe>
+    <key name="stand" qpos="0 0 0.18 1 0 0 0
+      0 0.25 0.45
+      0 0.25 0.45
+      0 0.25 0.45
+      0 0.25 0.45"/>
+  </keyframe>
+</mujoco>

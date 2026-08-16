@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Local downloads / caches
+_wheels/
+_tree.json
+*.whl
+
+# Trained weights (train on cloud, download separately)
+spider_quad/spider_ppo.zip
+**/pretrained/*.zip
+**/*.pkl
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/
