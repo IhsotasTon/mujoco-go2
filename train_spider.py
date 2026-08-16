@@ -5,7 +5,7 @@
 
 云上（AutoDL / RunPod）：
   export MUJOCO_GL=egl
-  python train_spider.py --timesteps 1500000
+  python train_spider.py --timesteps 3000000
 
 权重：spider_quad/spider_ppo.zip
 播放：python play_spider_rl.py
@@ -24,7 +24,7 @@ SAVE = ROOT / "spider_quad" / "spider_ppo.zip"
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--timesteps", type=int, default=1_200_000)
+    parser.add_argument("--timesteps", type=int, default=3_000_000)
     args = parser.parse_args()
 
     if sys.platform.startswith("linux"):
@@ -43,6 +43,7 @@ def main() -> None:
         n_steps=2048,
         batch_size=256,
         learning_rate=3e-4,
+        ent_coef=0.01,
         gamma=0.99,
         device="auto",
         policy_kwargs=dict(net_arch=[256, 256]),

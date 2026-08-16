@@ -37,8 +37,12 @@ def main() -> None:
         if now - last_poll > 0.05:
             if any_down("NUM8", "UP", "D8"):
                 _cmd["v"] = CMD_WALK
+                env.set_command(CMD_WALK)
+                print("当前：爬")
             if any_down("NUM7", "HOME", "D7"):
                 _cmd["v"] = CMD_FLIP
+                env.set_command(CMD_FLIP)
+                print("当前：空翻")
             if any_down("NUM0", "INSERT"):
                 _cmd["reset"] = True
             last_poll = now
@@ -47,10 +51,9 @@ def main() -> None:
             _cmd["reset"] = False
             obs, info = env.reset(options={"command": CMD_WALK})
             _cmd["v"] = CMD_WALK
-            print("已重置")
+            print("已重置，当前：爬")
             continue
 
-        env.set_command(_cmd["v"])
         action, _ = model.predict(obs, deterministic=True)
         obs, _reward, terminated, truncated, info = env.step(action)
         if terminated or truncated:

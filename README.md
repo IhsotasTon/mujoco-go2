@@ -32,7 +32,7 @@ python walk_spider.py
 
 ```bash
 export MUJOCO_GL=egl
-python train_spider.py --timesteps 1500000
+python train_spider.py --timesteps 3000000
 ```
 
 本地播放：`python play_spider_rl.py`（需要 `spider_quad/spider_ppo.zip`）

@@ -83,12 +83,14 @@ class SpiderEnv(gym.Env):
         self.command = int(np.clip(cmd, 0, 2))
 
     def _maybe_auto_right(self) -> None:
-        """爬的时候一旦肚子朝天，自动改成翻面任务。"""
-        if self.command == CMD_WALK:
-            grav = projected_gravity(self.data.qpos[3:7])
-            if float(grav[2]) < 0.15:
-                self.command = CMD_RIGHT
-                self.right_bonus_given = False
+        """爬的时候一旦肚子朝天，自动改成翻面任务；翻正后再回到爬。"""
+        grav = projected_gravity(self.data.qpos[3:7])
+        up = float(grav[2])
+        if self.command == CMD_WALK and up < 0.15:
+            self.command = CMD_RIGHT
+            self.right_bonus_given = False
+        elif self.command == CMD_RIGHT and self.right_bonus_given and up > 0.8:
+            self.command = CMD_WALK
 
     def _reward(self, action: np.ndarray) -> float:
         grav = projected_gravity(self.data.qpos[3:7])
@@ -98,31 +100,39 @@ class SpiderEnv(gym.Env):
         wy = float(self.data.qvel[4])
         smooth = float(np.square(action - self.prev_action).mean())
         energy = float(np.square(action).mean())
-        r = -0.01 * energy - 0.005 * smooth
+        r = -0.02 * energy - 0.01 * smooth
 
         if self.command == CMD_WALK:
-            r += 2.2 * vx
-            r += 0.6 * up
-            if 0.12 < z < 0.28:
-                r += 0.3
-            r -= 0.04 * abs(float(self.data.qvel[5]))
+            # 只有站稳时前进才给分，否则会学会用空翻骗速度
+            stand = 1.0 if up > 0.55 and 0.10 < z < 0.30 else 0.0
+            r += 2.4 * vx * stand
+            r += 1.0 * up
+            r -= 0.25 * abs(wy)
+            r -= 1.2 * max(0.0, 0.4 - up)
+            r -= 0.05 * abs(float(self.data.qvel[5]))
+            if stand:
+                r += 0.4
         elif self.command == CMD_FLIP:
-            r += 0.35 * float(np.clip(wy, 0.0, 12.0))
-            self.pitch_acc += wy * self.dt
-            if (not self.flip_bonus_given) and self.pitch_acc > 5.0 and up > 0.45:
-                r += 15.0
-                self.flip_bonus_given = True
-            if self.flip_bonus_given:
-                r += 1.2 * vx + 0.5 * up
+            # 空翻只奖「转一圈再落地」，转完继续转会扣分
+            if not self.flip_bonus_given:
+                r += 0.12 * float(np.clip(wy, 0.0, 8.0))
+                self.pitch_acc += wy * self.dt
+                if self.pitch_acc > 5.5 and up > 0.5 and 0.10 < z < 0.32:
+                    r += 18.0
+                    self.flip_bonus_given = True
+            else:
+                r += 1.4 * up + 1.0 * vx
+                r -= 0.35 * abs(wy)
         else:
-            r += 2.4 * up
+            r += 2.6 * up
+            r -= 0.08 * abs(wy) if up > 0.45 else 0.0
             if 0.10 < z < 0.30:
                 r += 0.4
             if (not self.right_bonus_given) and up > 0.75 and z > 0.11:
-                r += 10.0
+                r += 12.0
                 self.right_bonus_given = True
             if self.right_bonus_given:
-                r += 1.0 * vx
+                r += 0.8 * vx
         return r
 
     def step(self, action):
@@ -170,11 +180,11 @@ class SpiderEnv(gym.Env):
             forced = int(options["command"])
 
         roll = float(self.np_random.random()) if forced is None else -1.0
-        if forced == CMD_RIGHT or (forced is None and roll < 0.28):
+        if forced == CMD_RIGHT or (forced is None and roll < 0.15):
             self.command = CMD_RIGHT
             self.data.qpos[2] = 0.16
             self.data.qpos[3:7] = np.array([0.0, 1.0, 0.0, 0.0])
-        elif forced == CMD_FLIP or (forced is None and roll < 0.55):
+        elif forced == CMD_FLIP or (forced is None and roll < 0.30):
             self.command = CMD_FLIP
         else:
             self.command = CMD_WALK if forced is None else forced
