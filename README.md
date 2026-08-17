@@ -28,14 +28,15 @@ python walk_spider.py
 | 7 | 前空翻（手写冲量，落地不稳） |
 | 0 | 重置 |
 
-云上训练爬行 + 空翻 + 倒地翻面：
+云上训练先只做行走 + 避障（不要再用 `train_spider.py` 混训空翻）：
 
 ```bash
 export MUJOCO_GL=egl
-python train_spider.py --timesteps 3000000
+python train_spider_walk.py --timesteps 200000 --n-envs 8
+python eval_spider_walk.py
 ```
 
-本地播放：`python play_spider_rl.py`（需要 `spider_quad/spider_ppo.zip`）
+200k 步的评估过门槛（直立率高、能前进、角速度不大）再加长到 150 万。本地播放：`python play_spider_walk.py`。
 
 ## Unitree Go2
 

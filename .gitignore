@@ -12,6 +12,7 @@ _tree.json
 
 # Trained weights (train on cloud, download separately)
 spider_quad/spider_ppo.zip
+spider_quad/spider_walk_ppo.zip
 **/pretrained/*.zip
 **/*.pkl
 

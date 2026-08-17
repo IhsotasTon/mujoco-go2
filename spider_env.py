@@ -23,12 +23,16 @@ MAX_STEPS = 500
 
 
 def projected_gravity(quat: np.ndarray) -> np.ndarray:
-    qw, qx, qy, qz = quat
-    g = np.zeros(3, dtype=np.float32)
-    g[0] = 2 * (-qz * qx + qw * qy)
-    g[1] = -2 * (qz * qy + qw * qx)
-    g[2] = 1 - 2 * (qw * qw + qz * qz)
-    return g
+    """机体坐标里的世界 +Z。站立约 [0, 0, 1]，肚子朝天约 [0, 0, -1]。"""
+    w, x, y, z = (float(v) for v in quat)
+    return np.array(
+        [
+            2 * (x * z - w * y),
+            2 * (y * z + w * x),
+            1 - 2 * (x * x + y * y),
+        ],
+        dtype=np.float32,
+    )
 
 
 class SpiderEnv(gym.Env):
