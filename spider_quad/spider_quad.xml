@@ -38,11 +38,19 @@
     <geom name="floor" type="plane" size="0 0 0.05" material="grid"/>
     <geom name="crate_a" type="box" pos="0.55 0.15 0.04" size="0.08 0.08 0.04" material="darksteel"/>
     <geom name="crate_b" type="box" pos="0.90 -0.25 0.05" size="0.10 0.06 0.05" material="gunmetal"/>
-    <!-- 比蜘蛛高，走不过去，只能绕。训练时会随机挪位置。 -->
-    <geom name="obs_0" type="cylinder" pos="1.20 0.00 0.11" size="0.07 0.11" material="hazard"/>
-    <geom name="obs_1" type="cylinder" pos="1.70 0.45 0.11" size="0.07 0.11" material="darksteel"/>
-    <geom name="obs_2" type="cylinder" pos="2.10 -0.40 0.11" size="0.07 0.11" material="gunmetal"/>
-    <geom name="obs_3" type="cylinder" pos="2.60 0.15 0.11" size="0.07 0.11" material="hazard"/>
+    <!-- 避障柱：mocap 方便挪位置，播放时不再改静态 geom 导致闪烁 -->
+    <body name="obs_0" mocap="true" pos="1.20 0.00 0.11">
+      <geom name="obs_0" type="cylinder" size="0.07 0.11" material="hazard"/>
+    </body>
+    <body name="obs_1" mocap="true" pos="1.70 0.45 0.11">
+      <geom name="obs_1" type="cylinder" size="0.07 0.11" material="darksteel"/>
+    </body>
+    <body name="obs_2" mocap="true" pos="2.10 -0.40 0.11">
+      <geom name="obs_2" type="cylinder" size="0.07 0.11" material="gunmetal"/>
+    </body>
+    <body name="obs_3" mocap="true" pos="2.60 0.15 0.11">
+      <geom name="obs_3" type="cylinder" size="0.07 0.11" material="hazard"/>
+    </body>
 
     <body name="torso" pos="0 0 0.18">
       <freejoint name="root"/>

@@ -19,6 +19,7 @@ KD = 0.9
 ACTION_SCALE = 0.40
 MAX_STEPS = 600
 RF_CUTOFF = 1.4
+PLAY_OBS_XY = ((1.20, 0.00), (1.70, 0.45), (2.10, -0.40), (2.60, 0.15))
 OBS_NAMES = ("obs_0", "obs_1", "obs_2", "obs_3")
 RF_NAMES = ("rf_ll", "rf_l", "rf_c", "rf_r", "rf_rr")
 
@@ -77,26 +78,26 @@ class SpiderWalkEnv(gym.Env):
         )
 
     def _place_obstacles(self) -> None:
-        rng = self.np_random
-        used: list[tuple[float, float]] = [(0.0, 0.0)]
-        # 第一个挡在正前方附近，逼它绕
-        first_xy = (float(rng.uniform(0.75, 1.15)), float(rng.uniform(-0.22, 0.22)))
-        used.append(first_xy)
-        xys = [first_xy]
-        for _ in range(len(self.obs_gids) - 1):
-            for _try in range(40):
-                x = float(rng.uniform(0.9, 2.8))
-                y = float(rng.uniform(-0.75, 0.75))
-                if all((x - ux) ** 2 + (y - uy) ** 2 > 0.28**2 for ux, uy in used):
-                    used.append((x, y))
-                    xys.append((x, y))
-                    break
-            else:
-                xys.append((2.4, float(rng.uniform(-0.6, 0.6))))
-        for gid, (x, y) in zip(self.obs_gids, xys):
-            self.model.geom_pos[gid, 0] = x
-            self.model.geom_pos[gid, 1] = y
-            self.model.geom_pos[gid, 2] = 0.11
+        if self.render_mode == "human":
+            xys = list(PLAY_OBS_XY)
+        else:
+            rng = self.np_random
+            used: list[tuple[float, float]] = [(0.0, 0.0)]
+            first_xy = (float(rng.uniform(0.75, 1.15)), float(rng.uniform(-0.22, 0.22)))
+            used.append(first_xy)
+            xys = [first_xy]
+            for _ in range(len(self.obs_gids) - 1):
+                for _try in range(40):
+                    x = float(rng.uniform(0.9, 2.8))
+                    y = float(rng.uniform(-0.75, 0.75))
+                    if all((x - ux) ** 2 + (y - uy) ** 2 > 0.28**2 for ux, uy in used):
+                        used.append((x, y))
+                        xys.append((x, y))
+                        break
+                else:
+                    xys.append((2.4, float(rng.uniform(-0.6, 0.6))))
+        for i, (x, y) in enumerate(xys):
+            self.data.mocap_pos[i] = (x, y, 0.11)
 
     def _rangefinders(self) -> np.ndarray:
         vals = np.zeros(len(self.rf_adr), dtype=np.float32)
@@ -141,16 +142,20 @@ class SpiderWalkEnv(gym.Env):
         smooth = float(np.square(action - self.prev_action).mean())
 
         r = 0.0
-        r += 2.2 * vx if stand else 0.0
-        r += 0.6 * up
-        r -= 0.45 * abs(wy)
+        if stand:
+            r += 3.8 * vx
+            # 站住不走比迈步还赚，就会走两步就停
+            if vx < 0.08:
+                r -= 0.55
+        else:
+            r -= 0.8
+        r += 0.15 * up
+        r -= 0.50 * abs(wy)
         r -= 0.25 * abs(wx)
         r -= 0.08 * abs(wz)
         r -= 0.08 * abs(vy)
         r -= 0.02 * energy
         r -= 0.01 * smooth
-        if not stand:
-            r -= 0.8
         if hit:
             r -= 1.5
         info = {
@@ -197,8 +202,9 @@ class SpiderWalkEnv(gym.Env):
         self.steps = 0
         self.prev_action[:] = 0
         self._place_obstacles()
-        self.data.qpos[7:] += self.np_random.uniform(-0.03, 0.03, size=self.model.nu)
-        self.data.qvel[:] = self.np_random.uniform(-0.02, 0.02, size=self.model.nv)
+        if self.render_mode is None:
+            self.data.qpos[7:] += self.np_random.uniform(-0.03, 0.03, size=self.model.nu)
+            self.data.qvel[:] = self.np_random.uniform(-0.02, 0.02, size=self.model.nv)
         mujoco.mj_forward(self.model, self.data)
         info = {"x": 0.0, "vx": 0.0, "up": 1.0, "abs_wy": 0.0, "hit": 0.0, "stand": 1.0}
         return self._get_obs(), info
