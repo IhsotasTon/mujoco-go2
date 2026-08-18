@@ -76,6 +76,43 @@ class WalkRewardTests(unittest.TestCase):
                 break
         self.assertTrue(ended)
 
+    def test_turning_or_sidestep_is_not_idle(self) -> None:
+        # 柱子前减速转弯若被当成停住，就永远学不会绕开。
+        from spider_walk_env import is_idle_motion
+
+        self.assertTrue(is_idle_motion(0.0, 0.0, 0.0))
+        self.assertFalse(is_idle_motion(0.0, 0.25, 0.0))
+        self.assertFalse(is_idle_motion(0.0, 0.0, 0.40))
+
+    def test_sidestep_pays_more_than_stopping_in_front_of_pillar(self) -> None:
+        import mujoco
+
+        self.env.data.mocap_pos[0] = (0.45, 0.0, 0.11)
+        mujoco.mj_forward(self.env.model, self.env.data)
+        stop = _reward_at(self.env, vx=0.04, wy=0.10)
+        self.env.data.qvel[1] = 0.25
+        action = np.zeros(self.env.model.nu, dtype=np.float32)
+        sidestep, _ = self.env._reward(action, hit=False)
+        self.assertGreater(float(sidestep), stop)
+
+    def test_forward_pass_beats_orbiting_the_pillar(self) -> None:
+        # 柱前奖转弯会学会绕圈；过柱必须比围着转更赚。
+        import mujoco
+
+        self.env.data.mocap_pos[0] = (0.45, 0.0, 0.11)
+        mujoco.mj_forward(self.env.model, self.env.data)
+        action = np.zeros(self.env.model.nu, dtype=np.float32)
+        self.env.data.qvel[:] = 0.0
+        self.env.data.qvel[0] = 0.22
+        self.env.data.qvel[1] = 0.12
+        passing, _ = self.env._reward(action, hit=False)
+        self.env.data.qvel[:] = 0.0
+        self.env.data.qvel[0] = 0.02
+        self.env.data.qvel[1] = 0.22
+        self.env.data.qvel[5] = 0.70
+        orbit, _ = self.env._reward(action, hit=False)
+        self.assertGreater(float(passing), float(orbit))
+
 
 if __name__ == "__main__":
     unittest.main()

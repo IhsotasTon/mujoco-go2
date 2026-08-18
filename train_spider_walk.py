@@ -36,6 +36,7 @@ def main() -> None:
     parser.add_argument("--timesteps", type=int, default=200_000)
     parser.add_argument("--n-envs", type=int, default=0, help="0=Linux 8 / Windows 4")
     parser.add_argument("--dummy", action="store_true", help="单进程，EGL 出问题时用")
+    parser.add_argument("--resume", action="store_true", help="从已有 zip 接着训")
     args = parser.parse_args()
 
     if sys.platform.startswith("linux"):
@@ -53,21 +54,26 @@ def main() -> None:
         kind = "SubprocVecEnv"
 
     n_steps = max(128, 2048 // n_envs)
-    model = PPO(
-        "MlpPolicy",
-        env,
-        verbose=1,
-        n_steps=n_steps,
-        batch_size=256,
-        learning_rate=3e-4,
-        ent_coef=0.01,
-        gamma=0.99,
-        device="auto",
-        policy_kwargs=dict(net_arch=[256, 256]),
-    )
+    if args.resume and SAVE.exists():
+        model = PPO.load(str(SAVE.with_suffix("")), env=env, device="auto")
+        print(f"续训 {SAVE}")
+    else:
+        model = PPO(
+            "MlpPolicy",
+            env,
+            verbose=1,
+            n_steps=n_steps,
+            batch_size=256,
+            learning_rate=3e-4,
+            ent_coef=0.01,
+            gamma=0.99,
+            device="auto",
+            policy_kwargs=dict(net_arch=[256, 256]),
+        )
     print(f"行走+避障  {kind} x{n_envs}  {args.timesteps} 步 → {SAVE}")
     print("先看评估数字：直立、前进、角速度。过不了门槛就停。")
-    model.learn(total_timesteps=args.timesteps)
+    model.verbose = 1
+    model.learn(total_timesteps=args.timesteps, reset_num_timesteps=not args.resume)
     SAVE.parent.mkdir(parents=True, exist_ok=True)
     model.save(str(SAVE.with_suffix("")))
     print(f"已保存 {SAVE}")

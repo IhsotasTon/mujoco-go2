@@ -1,11 +1,11 @@
-"""播放行走+避障策略。
+"""播放行走+避障。倒下会后空翻回正。
 
 macOS 必须用：
   mjpython play_spider_walk.py
 
-不要用 view_spider.py：那个没有电机，蜘蛛会自己瘫倒。
-点格子地板聚焦窗口，不要点蜘蛛（点到身体等于推它）。
-倒了或停住后，窗口内按 0 重置。
+  小键盘 7 / 顶排 7     后空翻（倒了也会自动翻）
+  小键盘 0             重置
+点格子地板聚焦窗口，不要点蜘蛛。
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 import glfw
+import numpy as np
 from stable_baselines3 import PPO
 
 from spider_walk_env import STALL_STEPS, SpiderWalkEnv
@@ -25,44 +26,52 @@ def main() -> None:
     if not ZIP.exists():
         raise SystemExit(f"还没有权重：{ZIP}\n先跑 python train_spider_walk.py")
 
-    want_reset = {"v": False}
+    keys = {"reset": False, "flip": False}
 
     def on_key(keycode: int) -> None:
         if keycode in (glfw.KEY_KP_0, glfw.KEY_0, glfw.KEY_INSERT):
-            want_reset["v"] = True
+            keys["reset"] = True
+        elif keycode in (glfw.KEY_KP_7, glfw.KEY_7):
+            keys["flip"] = True
 
-    env = SpiderWalkEnv(render_mode="human")
+    env = SpiderWalkEnv(render_mode="human", recover=True)
     env.key_callback = on_key
     model = PPO.load(str(ZIP.with_suffix("")), device="cpu")
     obs, _ = env.reset()
     print(__doc__)
-    print("策略自己走。终端会写摔倒 / 停住 / 到时。")
+    print("自己走。倒了后空翻回正。7 = 手动后空翻。")
 
     paused = False
     while True:
         t0 = time.time()
-        if want_reset["v"]:
-            want_reset["v"] = False
+        if keys["reset"]:
+            keys["reset"] = False
             obs, _ = env.reset()
             paused = False
             print("已重置")
+        if keys["flip"]:
+            keys["flip"] = False
+            env.trigger_backflip()
+            paused = False
+            print("后空翻")
 
         if paused:
             env.render()
             time.sleep(0.02)
             continue
 
-        action, _ = model.predict(obs, deterministic=True)
+        if env.flip_steps > 0:
+            action = np.zeros(env.model.nu, dtype=np.float32)
+        else:
+            action, _ = model.predict(obs, deterministic=True)
         obs, _r, terminated, truncated, info = env.step(action)
-        if terminated or truncated:
+        if truncated:
+            paused = True
+            print(f"到时  x={info['x']:.2f}。按 0 重置。")
+        elif terminated:
             paused = True
             z = float(env.data.qpos[2])
-            if truncated:
-                why = "到时"
-            elif env.still_steps >= STALL_STEPS:
-                why = "停住"
-            else:
-                why = "摔倒"
+            why = "停住" if env.still_steps >= STALL_STEPS else "掉出范围"
             print(
                 f"{why}  步数={env.steps}  x={info['x']:.2f}  "
                 f"直立={info['up']:.2f}  高度={z:.3f}。按 0 重置。"

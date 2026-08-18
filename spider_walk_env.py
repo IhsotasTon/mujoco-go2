@@ -1,6 +1,6 @@
-"""只训行走 + 避障。没有空翻、没有翻面。
+"""只训行走 + 避障。播放时可后空翻回正。
 
-倒了直接结束。前进分只在站稳时给。撞柱子扣分。
+倒了直接结束（训练）。播放 recover=True 时倒下会后空翻翻正。
 """
 
 from __future__ import annotations
@@ -23,12 +23,24 @@ VX_COEF = 2.4
 ALIVE_BONUS = 0.30
 WY_COEF = 1.40
 FALL_PENALTY = 3.0
+BACKFLIP_UP = 2.3
+BACKFLIP_PITCH = -12.5
+BACKFLIP_BACK = -0.4
+BACKFLIP_STEPS = 45
+BACKFLIP_COOLDOWN = 20
 STALL_VX = 0.10
+STALL_VY = 0.10
+STALL_WZ = 0.20
 STALL_STEPS = 40
 RF_CUTOFF = 1.4
 PLAY_OBS_XY = ((1.20, 0.00), (1.70, 0.45), (2.10, -0.40), (2.60, 0.15))
 OBS_NAMES = ("obs_0", "obs_1", "obs_2", "obs_3")
 RF_NAMES = ("rf_ll", "rf_l", "rf_c", "rf_r", "rf_rr")
+
+
+def is_idle_motion(vx: float, vy: float, wz: float) -> bool:
+    """只有几乎完全不动才算停住。转弯/侧移要留给绕柱。"""
+    return abs(vx) < STALL_VX and abs(vy) < STALL_VY and abs(wz) < STALL_WZ
 
 
 def projected_gravity(quat: np.ndarray) -> np.ndarray:
@@ -47,10 +59,11 @@ def projected_gravity(quat: np.ndarray) -> np.ndarray:
 class SpiderWalkEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 50}
 
-    def __init__(self, render_mode=None):
+    def __init__(self, render_mode=None, recover=False):
         self.model = mujoco.MjModel.from_xml_path(str(XML))
         self.data = mujoco.MjData(self.model)
         self.render_mode = render_mode
+        self.recover = recover
         self.viewer = None
         self.key_callback = None
         self.frame_skip = 10
@@ -62,6 +75,8 @@ class SpiderWalkEnv(gym.Env):
         self.prev_action = np.zeros(self.model.nu, dtype=np.float32)
         self.steps = 0
         self.still_steps = 0
+        self.flip_steps = 0
+        self.flip_cooldown = 0
 
         self.obs_gids = [
             mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, name)
@@ -137,6 +152,17 @@ class SpiderWalkEnv(gym.Env):
                     return True
         return False
 
+    def trigger_backflip(self) -> None:
+        """一次冲量后空翻。播放里用来回正，训练评估不会走这条。"""
+        if self.flip_steps > 0:
+            return
+        self.flip_steps = BACKFLIP_STEPS
+        self.flip_cooldown = BACKFLIP_COOLDOWN
+        self.still_steps = 0
+        self.data.qvel[0] += BACKFLIP_BACK
+        self.data.qvel[2] += BACKFLIP_UP
+        self.data.qvel[4] += BACKFLIP_PITCH
+
     def _reward(self, action: np.ndarray, hit: bool) -> tuple[float, dict]:
         grav = projected_gravity(self.data.qpos[3:7])
         up = float(grav[2])
@@ -151,13 +177,23 @@ class SpiderWalkEnv(gym.Env):
         smooth = float(np.square(action - self.prev_action).mean())
 
         r = 0.0
-        moving = float(np.clip(vx / 0.10, 0.0, 1.0))
+        rf = self._rangefinders()
+        blocked = float(rf[2]) < 0.50
+        moving = float(np.clip(max(vx, abs(vy)) / 0.10, 0.0, 1.0)) if blocked else float(
+            np.clip(vx / 0.10, 0.0, 1.0)
+        )
         if stand:
             # 速度封顶；直立/存活分只给正在走的，避免站桩刷满 600 步
             r += VX_COEF * float(np.clip(vx, 0.0, VX_CAP))
             r += (ALIVE_BONUS + 1.8 * up) * moving
-            if vx < 0.08:
+            if vx < 0.08 and not blocked:
                 r -= 0.80
+            elif vx < 0.08:
+                r -= 0.15
+            if blocked:
+                # 前方有柱：侧移/转弯比停住更赚
+                r += 1.4 * abs(vy)
+                r += 0.5 * abs(wz)
         else:
             r -= 1.6
         r += 0.15 * up
@@ -180,6 +216,14 @@ class SpiderWalkEnv(gym.Env):
         return r, info
 
     def step(self, action):
+        grav0 = projected_gravity(self.data.qpos[3:7])
+        up0 = float(grav0[2])
+        if self.recover and self.flip_steps == 0 and self.flip_cooldown == 0 and up0 < 0.35:
+            self.trigger_backflip()
+        flipping = self.flip_steps > 0
+        if flipping:
+            action = np.zeros(self.model.nu, dtype=np.float32)
+
         action = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
         target = self.q_stand + action * ACTION_SCALE
         self.data.xfrc_applied[:] = 0
@@ -192,21 +236,39 @@ class SpiderWalkEnv(gym.Env):
             self.data.ctrl[:] = np.clip(tau, lo, hi)
             mujoco.mj_step(self.model, self.data)
 
+        grav = projected_gravity(self.data.qpos[3:7])
+        up = float(grav[2])
+        z = float(self.data.qpos[2])
+        if self.recover and self.flip_steps > 0 and up > 0.65 and 0.08 < z < 0.55:
+            self.data.qvel[3:6] *= 0.12
+            self.data.qvel[2] = min(float(self.data.qvel[2]), 0.15)
+            self.flip_steps = 0
+
         self.steps += 1
+        if self.flip_steps > 0:
+            self.flip_steps -= 1
+        if self.flip_cooldown > 0 and self.flip_steps == 0:
+            self.flip_cooldown -= 1
         hit = self._hit_obstacle()
         reward, info = self._reward(action, hit)
+        info["flip"] = float(self.flip_steps > 0)
         self.prev_action = action.copy()
         obs = self._get_obs()
 
         grav = projected_gravity(self.data.qpos[3:7])
         up = float(grav[2])
         z = float(self.data.qpos[2])
-        fallen = up < 0.40 or z < 0.07 or z > 0.38
-        if abs(float(self.data.qvel[0])) < STALL_VX:
+        if self.recover:
+            fallen = z < 0.03 or z > 0.70
+        else:
+            fallen = up < 0.40 or z < 0.07 or z > 0.38
+        if flipping:
+            self.still_steps = 0
+        elif is_idle_motion(float(self.data.qvel[0]), float(self.data.qvel[1]), float(self.data.qvel[5])):
             self.still_steps += 1
         else:
             self.still_steps = 0
-        stalled = self.still_steps >= STALL_STEPS
+        stalled = (not self.recover) and self.still_steps >= STALL_STEPS
         terminated = bool(fallen or stalled)
         truncated = self.steps >= MAX_STEPS
         if fallen:
@@ -222,11 +284,12 @@ class SpiderWalkEnv(gym.Env):
         mujoco.mj_resetDataKeyframe(self.model, self.data, 0)
         self.steps = 0
         self.still_steps = 0
+        self.flip_steps = 0
+        self.flip_cooldown = 0
         self.prev_action[:] = 0
         self._place_obstacles()
-        if self.render_mode is None:
-            self.data.qpos[7:] += self.np_random.uniform(-0.03, 0.03, size=self.model.nu)
-            self.data.qvel[:] = self.np_random.uniform(-0.02, 0.02, size=self.model.nv)
+        self.data.qpos[7:] += self.np_random.uniform(-0.03, 0.03, size=self.model.nu)
+        self.data.qvel[:] = self.np_random.uniform(-0.02, 0.02, size=self.model.nv)
         mujoco.mj_forward(self.model, self.data)
         if self.render_mode == "human":
             self.render()
