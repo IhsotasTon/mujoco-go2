@@ -1,10 +1,13 @@
-"""键盘读取：小键盘 + 顶排数字，不占用 MuJoCo 的字母键 / Space。"""
+"""键盘读取：小键盘 + 顶排数字，不占用 MuJoCo 的字母键 / Space。
+
+Windows 用 GetAsyncKeyState。macOS / Linux 没有这套 API，any_down 恒为 False，
+播放脚本改走 MuJoCo 窗口的 key_callback。
+"""
 
 from __future__ import annotations
 
 import ctypes
-
-user32 = ctypes.windll.user32
+import sys
 
 # 小键盘、顶排数字、方向键（NumLock 关掉时小键盘会变成方向键）
 VK = {
@@ -25,7 +28,7 @@ VK = {
     "DOWN": 0x28,    # 2
     "LEFT": 0x25,    # 4
     "CLEAR": 0x0C,   # 5
-    "RIGHT": 0x27,   # 6
+    "RIGHT": 0x27,    # 6
     "UP": 0x26,      # 8
     "D8": 0x38,      # 顶排 8
     "D2": 0x32,
@@ -35,9 +38,15 @@ VK = {
     "D0": 0x30,
 }
 
+_user32 = getattr(getattr(ctypes, "windll", None), "user32", None)
+
+
+def key_down(name_or_vk: str | int) -> bool:
+    if _user32 is None:
+        return False
+    vk = VK[name_or_vk] if isinstance(name_or_vk, str) else int(name_or_vk)
+    return bool(_user32.GetAsyncKeyState(vk) & 0x8000)
+
 
 def any_down(*names: str) -> bool:
-    for name in names:
-        if user32.GetAsyncKeyState(VK[name]) & 0x8000:
-            return True
-    return False
+    return any(key_down(name) for name in names)

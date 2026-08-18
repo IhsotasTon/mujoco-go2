@@ -16,8 +16,15 @@ XML = Path(__file__).resolve().parent / "spider_quad" / "spider_quad.xml"
 
 KP = 28.0
 KD = 0.9
-ACTION_SCALE = 0.40
+ACTION_SCALE = 0.32
 MAX_STEPS = 600
+VX_CAP = 0.35
+VX_COEF = 2.4
+ALIVE_BONUS = 0.30
+WY_COEF = 1.40
+FALL_PENALTY = 3.0
+STALL_VX = 0.10
+STALL_STEPS = 40
 RF_CUTOFF = 1.4
 PLAY_OBS_XY = ((1.20, 0.00), (1.70, 0.45), (2.10, -0.40), (2.60, 0.15))
 OBS_NAMES = ("obs_0", "obs_1", "obs_2", "obs_3")
@@ -45,6 +52,7 @@ class SpiderWalkEnv(gym.Env):
         self.data = mujoco.MjData(self.model)
         self.render_mode = render_mode
         self.viewer = None
+        self.key_callback = None
         self.frame_skip = 10
         self.model.opt.timestep = 0.002
         self.dt = self.model.opt.timestep * self.frame_skip
@@ -53,6 +61,7 @@ class SpiderWalkEnv(gym.Env):
         self.q_stand = self.data.qpos[7:].astype(np.float32).copy()
         self.prev_action = np.zeros(self.model.nu, dtype=np.float32)
         self.steps = 0
+        self.still_steps = 0
 
         self.obs_gids = [
             mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, name)
@@ -142,16 +151,18 @@ class SpiderWalkEnv(gym.Env):
         smooth = float(np.square(action - self.prev_action).mean())
 
         r = 0.0
+        moving = float(np.clip(vx / 0.10, 0.0, 1.0))
         if stand:
-            r += 3.8 * vx
-            # 站住不走比迈步还赚，就会走两步就停
+            # 速度封顶；直立/存活分只给正在走的，避免站桩刷满 600 步
+            r += VX_COEF * float(np.clip(vx, 0.0, VX_CAP))
+            r += (ALIVE_BONUS + 1.8 * up) * moving
             if vx < 0.08:
-                r -= 0.55
+                r -= 0.80
         else:
-            r -= 0.8
+            r -= 1.6
         r += 0.15 * up
-        r -= 0.50 * abs(wy)
-        r -= 0.25 * abs(wx)
+        r -= WY_COEF * abs(wy)
+        r -= 0.35 * abs(wx)
         r -= 0.08 * abs(wz)
         r -= 0.08 * abs(vy)
         r -= 0.02 * energy
@@ -171,6 +182,7 @@ class SpiderWalkEnv(gym.Env):
     def step(self, action):
         action = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
         target = self.q_stand + action * ACTION_SCALE
+        self.data.xfrc_applied[:] = 0
         for _ in range(self.frame_skip):
             q = self.data.qpos[7:]
             dq = self.data.qvel[6:]
@@ -190,8 +202,17 @@ class SpiderWalkEnv(gym.Env):
         up = float(grav[2])
         z = float(self.data.qpos[2])
         fallen = up < 0.40 or z < 0.07 or z > 0.38
-        terminated = bool(fallen)
+        if abs(float(self.data.qvel[0])) < STALL_VX:
+            self.still_steps += 1
+        else:
+            self.still_steps = 0
+        stalled = self.still_steps >= STALL_STEPS
+        terminated = bool(fallen or stalled)
         truncated = self.steps >= MAX_STEPS
+        if fallen:
+            reward -= FALL_PENALTY
+        elif stalled:
+            reward -= FALL_PENALTY
         if self.render_mode == "human":
             self.render()
         return obs, float(reward), terminated, truncated, info
@@ -200,12 +221,15 @@ class SpiderWalkEnv(gym.Env):
         super().reset(seed=seed)
         mujoco.mj_resetDataKeyframe(self.model, self.data, 0)
         self.steps = 0
+        self.still_steps = 0
         self.prev_action[:] = 0
         self._place_obstacles()
         if self.render_mode is None:
             self.data.qpos[7:] += self.np_random.uniform(-0.03, 0.03, size=self.model.nu)
             self.data.qvel[:] = self.np_random.uniform(-0.02, 0.02, size=self.model.nv)
         mujoco.mj_forward(self.model, self.data)
+        if self.render_mode == "human":
+            self.render()
         info = {"x": 0.0, "vx": 0.0, "up": 1.0, "abs_wy": 0.0, "hit": 0.0, "stand": 1.0}
         return self._get_obs(), info
 
@@ -213,7 +237,13 @@ class SpiderWalkEnv(gym.Env):
         if self.viewer is None:
             import mujoco.viewer
 
-            self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
+            self.viewer = mujoco.viewer.launch_passive(
+                self.model,
+                self.data,
+                key_callback=self.key_callback,
+                show_left_ui=False,
+                show_right_ui=False,
+            )
         self.viewer.sync()
 
     def close(self):
