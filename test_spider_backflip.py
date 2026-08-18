@@ -55,6 +55,12 @@ class BackflipRecoverTests(unittest.TestCase):
         self.env.trigger_backflip()
         self.assertTrue(self.env.busy)
 
+    def test_second_press_restarts_backflip(self) -> None:
+        self.env.trigger_backflip()
+        self.env.data.qvel[4] = 0.0
+        self.env.trigger_backflip()
+        self.assertLess(float(self.env.data.qvel[4]), -1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

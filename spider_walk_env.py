@@ -23,13 +23,14 @@ VX_COEF = 2.4
 ALIVE_BONUS = 0.30
 WY_COEF = 1.40
 FALL_PENALTY = 3.0
-BACKFLIP_UP = 2.3
-BACKFLIP_PITCH = -12.5
-BACKFLIP_BACK = -0.4
-BACKFLIP_STEPS = 45
-BACKFLIP_COOLDOWN = 20
-HOLD_STEPS = 30
-AUTO_FLIP_UP = 0.18
+BACKFLIP_UP = 3.2
+BACKFLIP_PITCH = -14.0
+BACKFLIP_BACK = -0.3
+BACKFLIP_STEPS = 50
+BACKFLIP_COOLDOWN = 6
+BACKFLIP_BOOST = 8
+HOLD_STEPS = 35
+AUTO_FLIP_UP = 0.50
 STALL_VX = 0.10
 STALL_VY = 0.10
 STALL_WZ = 0.20
@@ -79,6 +80,7 @@ class SpiderWalkEnv(gym.Env):
         self.still_steps = 0
         self.flip_steps = 0
         self.flip_cooldown = 0
+        self.flip_boost = 0
         self.hold_steps = 0
 
         self.obs_gids = [
@@ -161,15 +163,20 @@ class SpiderWalkEnv(gym.Env):
         return False
 
     def trigger_backflip(self) -> None:
-        """一次冲量后空翻。播放里用来回正，训练评估不会走这条。"""
-        if self.flip_steps > 0:
-            return
+        """按一次就重新起跳，不丢按键。"""
         self.flip_steps = BACKFLIP_STEPS
+        self.flip_boost = BACKFLIP_BOOST
         self.flip_cooldown = BACKFLIP_COOLDOWN
+        self.hold_steps = 0
         self.still_steps = 0
-        self.data.qvel[0] += BACKFLIP_BACK
-        self.data.qvel[2] += BACKFLIP_UP
-        self.data.qvel[4] += BACKFLIP_PITCH
+        if float(self.data.qpos[2]) < 0.14:
+            self.data.qpos[2] = 0.18
+        self.data.qvel[0] = BACKFLIP_BACK
+        self.data.qvel[1] = 0.0
+        self.data.qvel[2] = BACKFLIP_UP
+        self.data.qvel[3] = 0.0
+        self.data.qvel[4] = BACKFLIP_PITCH
+        self.data.qvel[5] = 0.0
 
     def _reward(self, action: np.ndarray, hit: bool) -> tuple[float, dict]:
         grav = projected_gravity(self.data.qpos[3:7])
@@ -226,7 +233,7 @@ class SpiderWalkEnv(gym.Env):
     def step(self, action):
         grav0 = projected_gravity(self.data.qpos[3:7])
         up0 = float(grav0[2])
-        if self.recover and self.flip_steps == 0 and self.flip_cooldown == 0 and up0 < AUTO_FLIP_UP:
+        if self.recover and (not self.busy) and up0 < AUTO_FLIP_UP:
             self.trigger_backflip()
         flipping = self.flip_steps > 0
         holding = self.hold_steps > 0
@@ -246,6 +253,10 @@ class SpiderWalkEnv(gym.Env):
             lo = self.model.actuator_ctrlrange[:, 0]
             hi = self.model.actuator_ctrlrange[:, 1]
             self.data.ctrl[:] = np.clip(tau, lo, hi)
+            if self.flip_boost > 0:
+                self.data.qvel[4] = BACKFLIP_PITCH
+                self.data.qvel[2] = max(float(self.data.qvel[2]), 1.8)
+                self.flip_boost -= 1
             mujoco.mj_step(self.model, self.data)
 
         grav = projected_gravity(self.data.qpos[3:7])
@@ -301,6 +312,7 @@ class SpiderWalkEnv(gym.Env):
         self.still_steps = 0
         self.flip_steps = 0
         self.flip_cooldown = 0
+        self.flip_boost = 0
         self.hold_steps = 0
         self.prev_action[:] = 0
         self._place_obstacles()
