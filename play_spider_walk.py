@@ -17,7 +17,7 @@ import glfw
 import numpy as np
 from stable_baselines3 import PPO
 
-from spider_walk_env import STALL_STEPS, SpiderWalkEnv
+from spider_walk_env import SpiderWalkEnv
 
 ZIP = Path(__file__).resolve().parent / "spider_quad" / "spider_walk_ppo.zip"
 
@@ -39,43 +39,32 @@ def main() -> None:
     model = PPO.load(str(ZIP.with_suffix("")), device="cpu")
     obs, _ = env.reset()
     print(__doc__)
-    print("自己走。倒了后空翻回正。7 = 手动后空翻。")
+    print("自己走。倒了后空翻回正，落地撑稳后再接着走。不会因 600 步暂停。")
 
-    paused = False
     while True:
         t0 = time.time()
         if keys["reset"]:
             keys["reset"] = False
             obs, _ = env.reset()
-            paused = False
             print("已重置")
         if keys["flip"]:
             keys["flip"] = False
             env.trigger_backflip()
-            paused = False
             print("后空翻")
 
-        if paused:
-            env.render()
-            time.sleep(0.02)
-            continue
-
-        if env.flip_steps > 0:
+        if env.busy:
             action = np.zeros(env.model.nu, dtype=np.float32)
         else:
             action, _ = model.predict(obs, deterministic=True)
         obs, _r, terminated, truncated, info = env.step(action)
-        if truncated:
-            paused = True
-            print(f"到时  x={info['x']:.2f}。按 0 重置。")
-        elif terminated:
-            paused = True
+        if terminated:
             z = float(env.data.qpos[2])
-            why = "停住" if env.still_steps >= STALL_STEPS else "掉出范围"
             print(
-                f"{why}  步数={env.steps}  x={info['x']:.2f}  "
+                f"掉出范围  步数={env.steps}  x={info['x']:.2f}  "
                 f"直立={info['up']:.2f}  高度={z:.3f}。按 0 重置。"
             )
+            obs, _ = env.reset()
+            print("已自动重置")
 
         elapsed = time.time() - t0
         time.sleep(max(0.0, env.dt - elapsed))

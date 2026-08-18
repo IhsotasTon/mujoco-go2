@@ -45,6 +45,16 @@ class BackflipRecoverTests(unittest.TestCase):
         self.assertGreater(max(ups), 0.55)
         self.assertGreater(float(projected_gravity(self.env.data.qpos[3:7])[2]), -0.2)
 
+    def test_recover_does_not_truncate_at_horizon(self) -> None:
+        self.env.steps = 599
+        action = np.zeros(self.env.model.nu, dtype=np.float32)
+        _obs, _r, _term, trunc, _info = self.env.step(action)
+        self.assertFalse(trunc)
+
+    def test_busy_while_backflip_blocks_walk(self) -> None:
+        self.env.trigger_backflip()
+        self.assertTrue(self.env.busy)
+
 
 if __name__ == "__main__":
     unittest.main()

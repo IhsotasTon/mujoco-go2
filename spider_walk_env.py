@@ -28,6 +28,8 @@ BACKFLIP_PITCH = -12.5
 BACKFLIP_BACK = -0.4
 BACKFLIP_STEPS = 45
 BACKFLIP_COOLDOWN = 20
+HOLD_STEPS = 30
+AUTO_FLIP_UP = 0.18
 STALL_VX = 0.10
 STALL_VY = 0.10
 STALL_WZ = 0.20
@@ -77,6 +79,7 @@ class SpiderWalkEnv(gym.Env):
         self.still_steps = 0
         self.flip_steps = 0
         self.flip_cooldown = 0
+        self.hold_steps = 0
 
         self.obs_gids = [
             mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, name)
@@ -122,6 +125,11 @@ class SpiderWalkEnv(gym.Env):
                     xys.append((2.4, float(rng.uniform(-0.6, 0.6))))
         for i, (x, y) in enumerate(xys):
             self.data.mocap_pos[i] = (x, y, 0.11)
+
+    @property
+    def busy(self) -> bool:
+        """后空翻或落地撑住期间，走路策略不许插手。"""
+        return self.flip_steps > 0 or self.hold_steps > 0
 
     def _rangefinders(self) -> np.ndarray:
         vals = np.zeros(len(self.rf_adr), dtype=np.float32)
@@ -218,14 +226,18 @@ class SpiderWalkEnv(gym.Env):
     def step(self, action):
         grav0 = projected_gravity(self.data.qpos[3:7])
         up0 = float(grav0[2])
-        if self.recover and self.flip_steps == 0 and self.flip_cooldown == 0 and up0 < 0.35:
+        if self.recover and self.flip_steps == 0 and self.flip_cooldown == 0 and up0 < AUTO_FLIP_UP:
             self.trigger_backflip()
         flipping = self.flip_steps > 0
-        if flipping:
+        holding = self.hold_steps > 0
+        if flipping or holding:
             action = np.zeros(self.model.nu, dtype=np.float32)
 
         action = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
-        target = self.q_stand + action * ACTION_SCALE
+        if flipping:
+            target = self.data.qpos[7:].copy()
+        else:
+            target = self.q_stand + action * ACTION_SCALE
         self.data.xfrc_applied[:] = 0
         for _ in range(self.frame_skip):
             q = self.data.qpos[7:]
@@ -243,15 +255,18 @@ class SpiderWalkEnv(gym.Env):
             self.data.qvel[3:6] *= 0.12
             self.data.qvel[2] = min(float(self.data.qvel[2]), 0.15)
             self.flip_steps = 0
+            self.hold_steps = HOLD_STEPS
 
         self.steps += 1
         if self.flip_steps > 0:
             self.flip_steps -= 1
+        elif self.hold_steps > 0:
+            self.hold_steps -= 1
         if self.flip_cooldown > 0 and self.flip_steps == 0:
             self.flip_cooldown -= 1
         hit = self._hit_obstacle()
         reward, info = self._reward(action, hit)
-        info["flip"] = float(self.flip_steps > 0)
+        info["flip"] = float(self.busy)
         self.prev_action = action.copy()
         obs = self._get_obs()
 
@@ -262,7 +277,7 @@ class SpiderWalkEnv(gym.Env):
             fallen = z < 0.03 or z > 0.70
         else:
             fallen = up < 0.40 or z < 0.07 or z > 0.38
-        if flipping:
+        if flipping or holding:
             self.still_steps = 0
         elif is_idle_motion(float(self.data.qvel[0]), float(self.data.qvel[1]), float(self.data.qvel[5])):
             self.still_steps += 1
@@ -270,7 +285,7 @@ class SpiderWalkEnv(gym.Env):
             self.still_steps = 0
         stalled = (not self.recover) and self.still_steps >= STALL_STEPS
         terminated = bool(fallen or stalled)
-        truncated = self.steps >= MAX_STEPS
+        truncated = (not self.recover) and self.steps >= MAX_STEPS
         if fallen:
             reward -= FALL_PENALTY
         elif stalled:
@@ -286,6 +301,7 @@ class SpiderWalkEnv(gym.Env):
         self.still_steps = 0
         self.flip_steps = 0
         self.flip_cooldown = 0
+        self.hold_steps = 0
         self.prev_action[:] = 0
         self._place_obstacles()
         self.data.qpos[7:] += self.np_random.uniform(-0.03, 0.03, size=self.model.nu)
