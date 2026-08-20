@@ -1,0 +1,4 @@
+{
+  "name": "mujoco-go2",
+  "install": "sudo apt-get update\nsudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libegl1 libgles2 libgl1 libosmesa6\npython3 -m pip install --user --upgrade pip\npython3 -m pip install --user -r requirements.txt\npython3 -m pip install --user -r g1_walk_ref/requirements.txt\npython3 -m pip install --user pyyaml glfw"
+}
