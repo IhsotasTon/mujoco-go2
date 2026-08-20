@@ -1,17 +1,18 @@
-"""只训蜘蛛行走 + 避障。
+"""只训蜘蛛稳定前进步态。避障和后空翻都不进训练。
 
 先短跑看数字，别一上来几百万步：
   python train_spider_walk.py --timesteps 200000
 
 云上（AutoDL，先装 libegl1 等）：
   export MUJOCO_GL=egl
-  python train_spider_walk.py --timesteps 1500000 --n-envs 8
+  python train_spider_walk.py --timesteps 200000 --n-envs 8
 
 权重：spider_quad/spider_walk_ppo.zip
 评估：python eval_spider_walk.py
 播放：python play_spider_walk.py
 
-这次不保证一次成功。200k 后若直立率低、角速度大，停下来改，别空转 4 小时。
+200k 后先看步态数字：直立、vx、|vy|、|wz|、|y|。过不了门槛就停，别空转去 150 万。
+不要用 train_spider.py 混训空翻。
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ SAVE = ROOT / "spider_quad" / "spider_walk_ppo.zip"
 def make_env():
     from spider_walk_env import SpiderWalkEnv
 
-    return SpiderWalkEnv()
+    return SpiderWalkEnv(walk_only=True)
 
 
 def main() -> None:
@@ -70,8 +71,8 @@ def main() -> None:
             device="auto",
             policy_kwargs=dict(net_arch=[256, 256]),
         )
-    print(f"行走+避障  {kind} x{n_envs}  {args.timesteps} 步 → {SAVE}")
-    print("先看评估数字：直立、前进、角速度。过不了门槛就停。")
+    print(f"只训步态（柱子停远处）  {kind} x{n_envs}  {args.timesteps} 步 → {SAVE}")
+    print("先看评估数字：直立、vx、|vy|、|wz|、|y|。过不了门槛就停。")
     model.verbose = 1
     model.learn(total_timesteps=args.timesteps, reset_num_timesteps=not args.resume)
     SAVE.parent.mkdir(parents=True, exist_ok=True)
@@ -79,12 +80,11 @@ def main() -> None:
     print(f"已保存 {SAVE}")
     env.close()
 
-    from eval_spider_walk import evaluate
+    from eval_spider_walk import evaluate, print_gait_stats
 
     stats = evaluate(SAVE, n_ep=6)
     print("=== 训练结束评估 ===")
-    for k, v in stats.items():
-        print(f"  {k:16s} {v:8.3f}")
+    print_gait_stats(stats)
 
 
 if __name__ == "__main__":

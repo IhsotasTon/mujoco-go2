@@ -1,4 +1,6 @@
-"""播放行走+避障。倒下会后空翻回正。
+"""播放行走。布局仍放 PLAY_OBS_XY 柱子，方便以后看绕障；当前权重只训了直线步态。
+
+倒下会后空翻回正（播放专用，不进训练）。
 
 macOS 必须用：
   mjpython play_spider_walk.py
@@ -34,7 +36,9 @@ def main() -> None:
         elif keycode in (glfw.KEY_KP_7, glfw.KEY_7):
             keys["flip"] = True
 
-    env = SpiderWalkEnv(render_mode="human", recover=True)
+    env = SpiderWalkEnv(
+        render_mode="human", recover=True, walk_only=False, play_layout=True
+    )
     env.key_callback = on_key
     model = PPO.load(str(ZIP.with_suffix("")), device="cpu")
     obs, _ = env.reset()
